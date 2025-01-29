@@ -7,7 +7,9 @@ from PyPDF2 import PdfReader
 from PIL import Image
 import pytesseract
 import pyttsx3
+import threading
 from enum import Enum
+from time import sleep
 
 class SummarizerFormat(Enum):
 	PARAGRAPH = "Paragraph"
@@ -20,6 +22,8 @@ genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 engine = pyttsx3.init()
 voices = engine.getProperty('voices')
+
+warn = None
 
 def summarize_note(note_text, format=SummarizerFormat.PARAGRAPH):
 	notes_format = ''
@@ -48,12 +52,18 @@ def extract_text_from_pdf(file):
 	return "\n".join(full_text)
 
 def output_voiceover(text, voice_option):
-    for voice in voices:
-        if voice.name == voice_option:
-            engine.setProperty('voice', voice.id)
-            break
-    engine.say(text)
-    engine.runAndWait()
+	def run():
+		for voice in voices:
+			if voice.name == voice_option:
+				engine.setProperty('voice', voice.id)
+				break
+		engine.say(text)
+		if engine._inLoop:
+			engine.endLoop()
+		else:
+			engine.runAndWait()
+	thread = threading.Thread(target=run)
+	thread.start()
 
 st.title("Note Summarizer")
 st.write("This app summarizes your notes into clear and concise format.")
@@ -64,36 +74,43 @@ if uploaded_file:
 		note_text = extract_text_from_docx(uploaded_file)
 	elif uploaded_file.type == "application/pdf":
 		note_text = extract_text_from_pdf(uploaded_file)
-	elif uploaded_file.type == "application/png":
-		st.warning("Please upload a valid file format.")
+	elif uploaded_file.type == "image/png":
 		note_text = extract_text_from_image(uploaded_file)
 	elif uploaded_file.type == "text/plain":
 		note_text = uploaded_file.getvalue().decode("utf-8")	
 	else:
 		st.error("Please upload a valid file format.")
 		note_text = None
-		# st.stop()
 else:
 	note_text = st.text_area("Enter your notes here:", "")
 
-summary = None
 format_selection = st.radio("Choose summary style:", [format.value for format in SummarizerFormat], horizontal=True)
+
+if 'summary' not in st.session_state:
+    st.session_state.summary = None
+
 if st.button("Summarize"):
 	if note_text:
-		summary = summarize_note(note_text, format=SummarizerFormat(format_selection))
-		st.subheader("Summary")
-		st.write(summary)
+		st.session_state.summary = summarize_note(note_text, format=SummarizerFormat(format_selection))
 	else:
-		st.warning("Please enter your notes to summarize.")
+		warn = "Please enter your notes to summarize."
 
-col1, col2 = st.columns([3, 1])
+if st.session_state.summary:
+	st.subheader("Summary")
+	st.write(st.session_state.summary)
+
+col1, col2 = st.columns([5, 1])
 with col1:
-	voice_option = st.selectbox("Choose voiceover option:", [voice.name for voice in voices])
+	voice_option = st.selectbox("Choose a voiceover", [voice.name for voice in voices], placeholder="Choose a voiceover", label_visibility="collapsed")
 with col2:
-	st.write("")  # Add an empty line to push the button down
-	st.write("")  # Add another empty line to push the button further down
-	if st.button("Voiceover"):
-		if summary:
-			output_voiceover(summary, voice_option)
+	if st.button("Voiceover", disabled=not st.session_state.summary):
+		if st.session_state.summary:
+			output_voiceover(st.session_state.summary, voice_option)
 		else:
-			st.warning("Please summarize your notes before generating voiceover.")
+			warn = "Please summarize your notes before generating voiceover."
+
+if warn:
+	st.warning(warn)
+
+if st.button("Reset"):
+    st.session_state.clear() + st.rerun()
