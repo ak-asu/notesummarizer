@@ -3,10 +3,9 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 import streamlit as st
 import googletrans
-from time import sleep
 from random import Random
-from io import BytesIO
 from src.constants import SummarizerFormat, SummaryContext, SummaryLength, ExportFileFormat
+from src.helpers import summarize_notes
 from src.file import export_summary, extract_text, extract_text_from_url
 from src.voiceover import Voiceover
 
@@ -19,7 +18,6 @@ translator = googletrans.Translator()
 voiceover = Voiceover()
 rng = Random()
 
-
 st.set_page_config(page_title="Note Summarizer", page_icon=':spiral_note_pad:', layout="centered")
 
 if 'summary' not in st.session_state:
@@ -27,23 +25,21 @@ if 'summary' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-def summarize_notes(note_text, format=SummarizerFormat.PARAGRAPH, length=SummaryLength.SHORT, context=SummaryContext.GENERAL):
-    notes_format = f'{format.getPrompt()}. {context.getPrompt()}, {length.getPrompt()}'
-    response = model.generate_content(f"You are a helpful assistant. Your task is to summarize these notes into clear and concise format. {notes_format}. The notes are: {note_text}")
-    return response.text
-
 @st.dialog("Delete summary")
 def delete_summary(ind):
     st.write(f"Are you sure you want to delete this summary?")
     if st.button("Confirm"):
-        st.session_state.history.pop(ind)
-        st.rerun()
+        if st.session_state.history and ind < len(st.session_state.history):
+            st.session_state.history.pop(ind)
+            st.rerun()
+        else:
+            st.toast("Error: summary not found.")
 
 st.title("Note Summarizer")
 st.write("This app summarizes your notes into clear and concise format. You can upload files, enter notes or provide a webpage URL to summarize. You can also generate voiceovers and export your summaries.")
 tab1, tab2 = st.tabs(["Summarization", "History"])
 with tab1:
-    uploaded_files = st.file_uploader("Upload files", type=["docx", "pdf", "png", "txt", "mp3"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload files", type=["docx", "pdf", "png", "txt", "wav", "mp3"], accept_multiple_files=True)
     url_text = st.text_input("Enter a webpage URL to summarize:", "")
     user_text = st.text_area("Enter your notes here:", "")
     col1, col2, col3 = st.columns([4, 1, 1], gap="small")
@@ -63,14 +59,23 @@ with tab1:
                     try:
                         note_texts.append(extract_text(uploaded_file))
                     except Exception as e:
-                        print(e)
                         st.toast(f"Error reading {uploaded_file.name}")
-            url_webpage_text = extract_text_from_url(url_text) if url_text else None
+            url_webpage_text = None
+            try:
+                url_webpage_text = extract_text_from_url(url_text) if url_text else None
+            except Exception as e:
+                st.toast("Error reading webpage URL")
             note_text = '\n'.join(note_texts + ([user_text] if user_text else []) + ([url_webpage_text] if url_webpage_text else []))
             if note_text:
                 with st.spinner(''):
-                    st.session_state.summary = summarize_notes(note_text, format=SummarizerFormat(format_selection), length=SummaryLength(summary_length), context=SummaryContext(context_selection))
-                    st.session_state.history.append(st.session_state.summary)
+                    try:
+                        st.session_state.summary = summarize_notes(note_text, model, format=SummarizerFormat(format_selection), length=SummaryLength(summary_length), context=SummaryContext(context_selection))
+                        if st.session_state.history:
+                            st.session_state.history.append(st.session_state.summary)
+                        else:
+                            st.session_state.history = [st.session_state.summary]
+                    except Exception as e:
+                        st.toast("Error summarizing notes.")
             else:
                 st.toast("Please provide notes to summarize.")
     st.divider()
@@ -85,7 +90,12 @@ with tab1:
             selection = st.segmented_control("Download file format", [i.value for i in ExportFileFormat], selection_mode="single", default=ExportFileFormat.TXT.value, key=f"selection")
         with col13:
             st.write('')
-            st.download_button(label="Download", use_container_width=True, data=export_summary(st.session_state.summary, ExportFileFormat(selection)), file_name=f"summary_{str(rng.random())[2:]}{ExportFileFormat(selection).get_extension()}", key="download")
+            try:
+                data = export_summary(st.session_state.summary, ExportFileFormat(selection))
+                st.download_button(label="Download", use_container_width=True, data=data, file_name=f"summary_{str(rng.random())[2:]}{ExportFileFormat(selection).get_extension()}", key="download")
+            except Exception as e:
+                st.empty()
+                st.toast(f"Error exporting summary in the {selection} file format.")
     col4, col5, col6 = st.columns([5, 6, 2])
     with col4:
         st.empty()
@@ -94,8 +104,12 @@ with tab1:
         voice_option = st.selectbox("Choose a voiceover", voiceover.voices.keys(), placeholder="Choose a voiceover", label_visibility="collapsed")
     with col6:
         if st.button("Translate", disabled=(not st.session_state.summary)):
-            st.session_state.summary = translator.translate(st.session_state.summary, dest=target_lang).text
-        if st.button("Voiceover", disabled=(not st.session_state.summary)):
+            try:
+                st.session_state.summary = translator.translate(st.session_state.summary, dest=target_lang).text
+                st.rerun()
+            except Exception as e:
+                st.toast("Error translating summary.")
+        if st.button("Voiceover", disabled=(not st.session_state.summary or target_lang!="en")):
             voiceover.output_voiceover(st.session_state.summary, voice_option)
 with tab2:
     summaries = st.session_state.history
@@ -108,7 +122,12 @@ with tab2:
                 with col22:
                     selection = st.segmented_control("Download file format", [i.value for i in ExportFileFormat], selection_mode="single", default=ExportFileFormat.TXT.value, label_visibility="collapsed", key=f"selection_{ind}")
                 with col23:
-                    st.download_button(label="Download", use_container_width=True, data=export_summary(summary, ExportFileFormat(selection)), file_name=f"summary_{str(rng.random())[2:]}{ExportFileFormat(selection).get_extension()}", key=f"download_{ind}")
+                    try:
+                        data = export_summary(summary, ExportFileFormat(selection))
+                        st.download_button(label="Download", use_container_width=True, data=data, file_name=f"summary_{str(rng.random())[2:]}{ExportFileFormat(selection).get_extension()}", key=f"download_{ind}")
+                    except Exception as e:
+                        st.empty()
+                        st.toast(f"Error exporting summary in the {selection} file format.")
                 with col24:
                     if st.button("Delete", use_container_width=True, key=f"delete_{ind}"):
                         delete_summary(ind)

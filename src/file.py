@@ -1,5 +1,4 @@
 import os
-import sys
 import streamlit as st
 from docx import Document
 from PyPDF2 import PdfReader, PdfWriter
@@ -7,11 +6,13 @@ from fpdf import FPDF
 from PIL import Image
 import pytesseract
 import tempfile
-import whisper
 from newspaper import Article
 from io import BytesIO
+import wave
+import json
+from vosk import Model, KaldiRecognizer
 from .constants import ExportFileFormat
-from .helpers import CustomProgressBar
+from .helpers import convert_to_wav
 
 
 def _extract_text_from_docx(file):
@@ -32,15 +33,27 @@ def _extract_text_from_image(file):
     return pytesseract.image_to_string(image)
 
 def _extract_text_from_audio(file):
-    temp_dir = os.path.join(os.getcwd(), "temp_files")
-    os.makedirs(temp_dir, exist_ok=True)
-    temp_audio_fd, temp_audio_path = tempfile.mkstemp(suffix=".mp3", dir=temp_dir)
-    with os.fdopen(temp_audio_fd, 'wb') as temp_audio:
-        temp_audio.write(file.read())
-    model = whisper.load_model("small")
-    result = model.transcribe(temp_audio_path, verbose=None, fp16=False)
-    os.remove(temp_audio_path)
-    return result["text"]
+    model = Model("model")
+    temp_file = convert_to_wav(file)
+    try:
+        wf = wave.open(temp_file, "rb")
+    except Exception as e:
+        raise ValueError(f"Error opening audio file: {e}")
+    if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getcomptype() != "NONE":
+        raise ValueError("Audio file must be WAV format with 16-bit PCM and mono channel")
+    recognizer = KaldiRecognizer(model, wf.getframerate())
+    transcript = []
+    while True:
+        data = wf.readframes(4000)
+        if len(data) == 0:
+            break
+        if recognizer.AcceptWaveform(data):
+            result = json.loads(recognizer.Result())
+            transcript.append(result.get("text", ""))
+    result = json.loads(recognizer.FinalResult())
+    transcript.append(result.get("text", ""))
+    os.remove(temp_file)
+    return " ".join(transcript)
 
 def extract_text(file):
     if file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
@@ -51,7 +64,7 @@ def extract_text(file):
         return _extract_text_from_image(file)
     elif file.type == "text/plain":
         return _extract_text_from_txt(file)
-    elif file.type == "audio/mpeg":
+    elif file.type == "audio/wav" or file.type == "audio/mpeg":
         return _extract_text_from_audio(file)
     else:
         raise ValueError("Please upload a valid file format.")
