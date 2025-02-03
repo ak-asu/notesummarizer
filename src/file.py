@@ -38,8 +38,11 @@ def _extract_text_from_audio(file):
     try:
         wf = wave.open(temp_file, "rb")
     except Exception as e:
+        os.remove(temp_file)
         raise ValueError(f"Error opening audio file: {e}")
     if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getcomptype() != "NONE":
+        wf.close()
+        os.remove(temp_file)
         raise ValueError("Audio file must be WAV format with 16-bit PCM and mono channel")
     recognizer = KaldiRecognizer(model, wf.getframerate())
     transcript = []
@@ -52,6 +55,7 @@ def _extract_text_from_audio(file):
             transcript.append(result.get("text", ""))
     result = json.loads(recognizer.FinalResult())
     transcript.append(result.get("text", ""))
+    wf.close()
     os.remove(temp_file)
     return " ".join(transcript)
 

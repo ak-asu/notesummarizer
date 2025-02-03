@@ -20,6 +20,6 @@ def convert_to_wav(file):
     return output_path
 
 def summarize_notes(note_text, model, format=SummarizerFormat.PARAGRAPH, length=SummaryLength.SHORT, context=SummaryContext.GENERAL):
-    notes_format = f'{format.getPrompt()}, {context.getPrompt()}, {length.getPrompt()}.'
-    response = model.generate_content(f"You are a helpful assistant. Your task is to organise and summarize these notes into clear and concise format. {notes_format} The notes from various sources are provided as follows:\n{note_text}")
+    notes_format = f'(1) {format.getPrompt()} (2) {context.getPrompt()} (3) {length.getPrompt()}'
+    response = model.generate_content(f"You are a helpful, an intelligent and highly skilled assistant. Your task is to organise and summarize these notes into clear, concise and well-structured format. Ensure to follow the following 3 points when providing a summary. {notes_format} The notes from various sources (might or might not be related) are provided as follows:\n{note_text}")
     return response.text

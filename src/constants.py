@@ -1,6 +1,10 @@
 from enum import Enum
 
 
+MAX_FILES = 5
+MAX_FILE_SIZE_MB = 16
+MAX_NOTE_LENGTH = 16000
+
 class SummarizerFormat(Enum):
     PARAGRAPH = "Paragraph"
     BULLET_POINTS = "Bullet points"
@@ -8,11 +12,11 @@ class SummarizerFormat(Enum):
 
     def getPrompt(self):
         if self == SummarizerFormat.PARAGRAPH:
-            return "Summarize the text in paragraph format."
+            return "Summarize the text in paragraphs."
         elif self == SummarizerFormat.BULLET_POINTS:
             return "Summarize the text in bullet points."
         elif self == SummarizerFormat.STUDY_GUIDE:
-            return "Summarize the text in a study guide format."
+            return "Summarize the text in a study guide format, providing a plan to cover the topics."
 
 class SummaryContext(Enum):
     GENERAL = "General"
@@ -21,14 +25,7 @@ class SummaryContext(Enum):
     CASUAL = "Casual"
 
     def getPrompt(self):
-        if self == SummaryContext.GENERAL:
-            return "Summarize with a general tone."
-        elif self == SummaryContext.ACADEMIC:
-            return "Summarize with an academic tone."
-        elif self == SummaryContext.BUSINESS:
-            return "Summarize with a business tone."
-        elif self == SummaryContext.CASUAL:
-            return "Summarize with a casual tone."
+        return f"Adapt the tone and style to be {self.value.lower()}."
 
 class SummaryLength(Enum):
     SHORT = "Short"
@@ -36,12 +33,7 @@ class SummaryLength(Enum):
     LONG = "Long"
 
     def getPrompt(self):
-        if self == SummaryLength.SHORT:
-            return "Summarize the text in a short length."
-        elif self == SummaryLength.MEDIUM:
-            return "Summarize the text in a medium length."
-        elif self == SummaryLength.LONG:
-            return "Summarize the text in a long length."
+        return f"Use a {self.value.lower()} level of detail, balancing conciseness with comprehensiveness."
 
 class ExportFileFormat(Enum):
     DOCX = "docx"

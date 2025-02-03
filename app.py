@@ -1,10 +1,11 @@
 import os
+import asyncio
 from dotenv import load_dotenv
 import google.generativeai as genai
 import streamlit as st
 import googletrans
 from random import Random
-from src.constants import SummarizerFormat, SummaryContext, SummaryLength, ExportFileFormat
+from src.constants import SummarizerFormat, SummaryContext, SummaryLength, ExportFileFormat, MAX_NOTE_LENGTH
 from src.helpers import summarize_notes
 from src.file import export_summary, extract_text, extract_text_from_url
 from src.voiceover import Voiceover
@@ -51,7 +52,7 @@ with tab1:
             summary_length = st.radio("Choose summary length:", [i.value for i in SummaryLength], horizontal=True)
             context_selection = st.selectbox("Choose summary context:", [i.value for i in SummaryContext])
     with col3:
-        if st.button("Summarize"):
+        if st.button("Summarize", type="primary"):
             st.session_state.summary = None
             note_texts = []
             if uploaded_files:
@@ -67,6 +68,8 @@ with tab1:
                 st.toast("Error reading webpage URL")
             note_text = '\n'.join(note_texts + ([user_text] if user_text else []) + ([url_webpage_text] if url_webpage_text else []))
             if note_text:
+                if len(note_text) > MAX_NOTE_LENGTH:
+                    st.toast(f"The notes are too lengthy for an efficient summary. It is advised to summarize them in smaller parts under {MAX_NOTE_LENGTH} characters.")
                 with st.spinner(''):
                     try:
                         st.session_state.summary = summarize_notes(note_text, model, format=SummarizerFormat(format_selection), length=SummaryLength(summary_length), context=SummaryContext(context_selection))
@@ -104,19 +107,22 @@ with tab1:
         voice_option = st.selectbox("Choose a voiceover", voiceover.voices.keys(), placeholder="Choose a voiceover", label_visibility="collapsed")
     with col6:
         if st.button("Translate", disabled=(not st.session_state.summary)):
-            try:
-                st.session_state.summary = translator.translate(st.session_state.summary, dest=target_lang).text
-                st.rerun()
-            except Exception as e:
-                st.toast("Error translating summary.")
-        if st.button("Voiceover", disabled=(not st.session_state.summary or target_lang!="en")):
+            async def translate_summary():
+                try:
+                    new_text = await translator.translate(st.session_state.summary, dest=target_lang)
+                    st.session_state.summary = new_text.text
+                    st.rerun()
+                except Exception as e:
+                    st.toast("Error translating summary.")
+            asyncio.run(translate_summary())
+        if st.button("Voiceover", disabled=(not st.session_state.summary)):
             voiceover.output_voiceover(st.session_state.summary, voice_option)
 with tab2:
     summaries = st.session_state.history
     for ind, summary in enumerate(summaries):
         with st.container():
             with st.expander(f'{summary[:50]} ...'):
-                col21, col22, col23, col24 = st.columns([6, 4, 3, 2])
+                col21, col22, col23, col24 = st.columns([6, 3, 1, 1])
                 with col21:
                     st.empty()
                 with col22:
@@ -124,12 +130,12 @@ with tab2:
                 with col23:
                     try:
                         data = export_summary(summary, ExportFileFormat(selection))
-                        st.download_button(label="Download", use_container_width=True, data=data, file_name=f"summary_{str(rng.random())[2:]}{ExportFileFormat(selection).get_extension()}", key=f"download_{ind}")
+                        st.download_button("", icon=":material/download:", use_container_width=True, data=data, file_name=f"summary_{str(rng.random())[2:]}{ExportFileFormat(selection).get_extension()}", key=f"download_{ind}")
                     except Exception as e:
                         st.empty()
                         st.toast(f"Error exporting summary in the {selection} file format.")
                 with col24:
-                    if st.button("Delete", use_container_width=True, key=f"delete_{ind}"):
+                    if st.button("", icon=":material/delete:", use_container_width=True, key=f"delete_{ind}"):
                         delete_summary(ind)
                 st.write(summary)
 if st.button("Reset", key="reset_button", use_container_width=True, type="primary"):
